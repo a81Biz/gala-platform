@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	contracts "gala/internal/contracts/renderer/v0"
 	"gala/internal/worker/renderer"
 	"gala/internal/worker/util"
 )
@@ -54,7 +55,7 @@ func (p *Processor) ProcessJob(ctx context.Context, jobID string) error {
 	)
 
 	// 3) Construir spec (Hello Render v0)
-	spec := RendererSpec{
+	spec := contracts.RendererSpec{
 		JobID:  jobID,
 		Params: params,
 	}
@@ -148,4 +149,4 @@ func (p *Processor) failJob(jobID string) {
 	)
 }
 
-var _ = time.Now // evita “unused” si cambias logs
+var _ = time.Now
