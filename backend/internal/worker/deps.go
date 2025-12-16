@@ -3,6 +3,8 @@ package worker
 import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+
+	"gala/internal/ports"
 )
 
 type Deps struct {
@@ -11,4 +13,6 @@ type Deps struct {
 	RendererBaseURL string
 	StorageRoot     string
 	QueueName       string
+
+	SP ports.StorageProvider
 }

@@ -1,105 +1,94 @@
+version: "3.9"
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:15
+    container_name: gala-postgres
     environment:
-      POSTGRES_DB: gala
       POSTGRES_USER: gala
       POSTGRES_PASSWORD: gala
+      POSTGRES_DB: gala
     volumes:
-      - gala_pgdata:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     ports:
       - "5432:5432"
-    networks: [gala-net]
 
   redis:
-    image: redis:7-alpine
+    image: redis:7
+    container_name: gala-redis
     ports:
       - "6379:6379"
-    networks: [gala-net]
 
   api:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      target: api
+    container_name: gala-api
     environment:
-      GALA_ENV: local
       HTTP_PORT: "8080"
-      DATABASE_URL: "postgres://gala:gala@postgres:5432/gala?sslmode=disable"
-      REDIS_ADDR: "redis:6379"
-      STORAGE_PROVIDER: "localfs"
-      STORAGE_LOCAL_ROOT: "/data"
-      RENDERER_ENDPOINT: "http://renderer:9000" # (v0: opcional si invocas por HTTP; si invocas por docker exec, ignóralo)
+      DATABASE_URL: postgres://gala:gala@postgres:5432/gala
+      REDIS_ADDR: redis:6379
+
+      # ---- STORAGE ----
+      STORAGE_PROVIDER: gdrive
+      STORAGE_LOCAL_ROOT: /data
+
+      # ---- GDRIVE (OAuth Installed App) ----
+      GDRIVE_CLIENT_ID: "${GDRIVE_CLIENT_ID}"
+      GDRIVE_CLIENT_SECRET: "${GDRIVE_CLIENT_SECRET}"
+      GDRIVE_REFRESH_TOKEN: "${GDRIVE_REFRESH_TOKEN}"
+      GDRIVE_FOLDER_ID: "${GDRIVE_FOLDER_ID}"
+
     volumes:
-      - gala_storage:/data
-    ports:
-      - "8080:8080"
+      - data:/data
     depends_on:
       - postgres
       - redis
-    networks: [gala-net]
+    ports:
+      - "8080:8080"
 
   worker:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    command: ["/app/worker"]
+      target: worker
+    container_name: gala-worker
     environment:
-      GALA_ENV: local
-      DATABASE_URL: "postgres://gala:gala@postgres:5432/gala?sslmode=disable"
-      REDIS_ADDR: "redis:6379"
-      RENDERER_HTTP_BASEURL: "http://renderer:9000"
-      STORAGE_LOCAL_ROOT: "/data"
+      DATABASE_URL: postgres://gala:gala@postgres:5432/gala
+      REDIS_ADDR: redis:6379
+      JOB_QUEUE_NAME: gala:jobs
+      RENDERER_HTTP_BASEURL: http://renderer:9000
+
+      # ---- STORAGE ----
+      STORAGE_PROVIDER: gdrive
+      STORAGE_LOCAL_ROOT: /data
+
+      # ---- GDRIVE ----
+      GDRIVE_CLIENT_ID: "${GDRIVE_CLIENT_ID}"
+      GDRIVE_CLIENT_SECRET: "${GDRIVE_CLIENT_SECRET}"
+      GDRIVE_REFRESH_TOKEN: "${GDRIVE_REFRESH_TOKEN}"
+      GDRIVE_FOLDER_ID: "${GDRIVE_FOLDER_ID}"
+
     volumes:
-      - gala_storage:/data
+      - data:/data
     depends_on:
-      - api
       - postgres
       - redis
       - renderer
-    networks: [gala-net]
-
 
   renderer:
     build:
       context: ../renderer
-      dockerfile: Dockerfile
+    container_name: gala-renderer
     environment:
-      STORAGE_LOCAL_ROOT: "/data"
-      # Si expones un HTTP simple (opcional) para render v0:
       RENDERER_PORT: "9000"
     volumes:
-      - gala_storage:/data
+      - data:/data
     ports:
       - "9000:9000"
-    networks: [gala-net]
-
-  frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-    environment:
-      VITE_API_BASEURL: "http://localhost:8080"
-    ports:
-      - "5173:5173"
-    depends_on:
-      - api
-    networks: [gala-net]
-
-  swagger-ui:
-    image: swaggerapi/swagger-ui:v5.17.14
-    environment:
-      SWAGGER_JSON: /spec/v0.yaml
-    volumes:
-      - ../docs/openapi:/spec:ro
-    ports:
-      - "8081:8080"
-    networks: [gala-net]
-
-
-networks:
-  gala-net:
 
 volumes:
-  gala_pgdata:
-  gala_storage:
+  pgdata:
+  data:

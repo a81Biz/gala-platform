@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"gala/internal/storage"
 	"gala/internal/worker"
 	"gala/internal/worker/util"
 )
@@ -29,12 +30,18 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	defer rdb.Close()
 
+	sp, err := storage.NewProvider()
+	if err != nil {
+		panic(err)
+	}
+
 	deps := worker.Deps{
 		Pool:            pool,
 		RDB:             rdb,
 		RendererBaseURL: rendererBaseURL,
 		StorageRoot:     storageRoot,
 		QueueName:       queueName,
+		SP:              sp,
 	}
 
 	fmt.Println("GALA Worker started")

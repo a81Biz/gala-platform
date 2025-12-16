@@ -1,71 +1,84 @@
 package localfs
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"io"
-	"mime"
-	"os"
-	"path/filepath"
-	"strings"
+    "context"
+    "fmt"
+    "io"
+    "mime"
+    "net/http"
+    "os"
+    "path/filepath"
+    "time"
 
-	"gala/internal/ports"
+    "gala/internal/ports"
 )
 
-type Provider struct {
-	Root string // /data
+// LocalFS implements ports.StorageProvider using the local filesystem.
+// It stores objects under a configured root directory.
+type LocalFS struct {
+    root string
 }
 
-func New(root string) *Provider { return &Provider{Root: root} }
-
-func (p *Provider) abs(objectKey string) string {
-	objectKey = strings.TrimPrefix(objectKey, "/")
-	return filepath.Join(p.Root, objectKey)
+func New(root string) *LocalFS {
+    return &LocalFS{root: root}
 }
 
-func (p *Provider) PutObject(ctx context.Context, in ports.PutObjectInput) (ports.PutObjectOutput, error) {
-	path := p.abs(in.ObjectKey)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return ports.PutObjectOutput{}, err
-	}
+func (l *LocalFS) Provider() string { return "localfs" }
 
-	f, err := os.Create(path)
-	if err != nil {
-		return ports.PutObjectOutput{}, err
-	}
-	defer f.Close()
+func (l *LocalFS) PutObject(ctx context.Context, in ports.PutObjectInput) (ports.PutObjectOutput, error) {
+    if in.ObjectKey == "" {
+        return ports.PutObjectOutput{}, fmt.Errorf("object_key is required")
+    }
 
-	// Copy + hash (opcional)
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), in.Reader)
-	if err != nil {
-		return ports.PutObjectOutput{}, err
-	}
-	_ = hex.EncodeToString(h.Sum(nil)) // lo usaremos cuando guardemos checksum si quieres
+    dst := filepath.Join(l.root, filepath.FromSlash(in.ObjectKey))
+    if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+        return ports.PutObjectOutput{}, err
+    }
 
-	return ports.PutObjectOutput{ObjectKey: in.ObjectKey, Size: n}, nil
+    outF, err := os.Create(dst)
+    if err != nil {
+        return ports.PutObjectOutput{}, err
+    }
+    defer outF.Close()
+
+    n, err := io.Copy(outF, in.Reader)
+    if err != nil {
+        return ports.PutObjectOutput{}, err
+    }
+
+    return ports.PutObjectOutput{ObjectKey: in.ObjectKey, Size: n}, nil
 }
 
-func (p *Provider) GetObject(ctx context.Context, objectKey string) (io.ReadCloser, string, int64, error) {
-	path := p.abs(objectKey)
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, "", 0, err
-	}
-	st, err := f.Stat()
-	if err != nil {
-		_ = f.Close()
-		return nil, "", 0, err
-	}
-	ext := filepath.Ext(path)
-	m := mime.TypeByExtension(ext)
-	if m == "" {
-		m = "application/octet-stream"
-	}
-	return f, m, st.Size(), nil
+func (l *LocalFS) GetObject(ctx context.Context, objectKey string) (rc io.ReadCloser, contentType string, size int64, err error) {
+    p := filepath.Join(l.root, filepath.FromSlash(objectKey))
+    f, err := os.Open(p)
+    if err != nil {
+        return nil, "", 0, err
+    }
+
+    st, statErr := f.Stat()
+    if statErr == nil {
+        size = st.Size()
+    }
+
+    // Prefer extension-based type. If empty, sniff first bytes.
+    contentType = mime.TypeByExtension(filepath.Ext(p))
+    if contentType == "" {
+        buf := make([]byte, 512)
+        n, _ := f.Read(buf)
+        _, _ = f.Seek(0, 0)
+        contentType = http.DetectContentType(buf[:n])
+    }
+
+    return f, contentType, size, nil
 }
 
-func (p *Provider) DeleteObject(ctx context.Context, objectKey string) error {
-	return os.Remove(p.abs(objectKey))
+func (l *LocalFS) DeleteObject(ctx context.Context, objectKey string) error {
+    p := filepath.Join(l.root, filepath.FromSlash(objectKey))
+    return os.Remove(p)
+}
+
+func (l *LocalFS) GetSignedURL(ctx context.Context, objectKey string, expiresIn time.Duration) (ports.SignedURLOutput, error) {
+    // v0: local provider has no real signed URLs; API currently serves /assets/{id}/content.
+    return ports.SignedURLOutput{URL: "", ExpiresAt: time.Now().UTC().Add(expiresIn)}, nil
 }

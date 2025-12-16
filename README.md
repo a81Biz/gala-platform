@@ -199,3 +199,116 @@ GALA **no crece por parches**, crece por **entregables cerrados**.
 Cada fase deja el sistema **estable, documentado y ejecutable**.
 
 ---
+
+## Storage estable (documentación mínima)
+
+### Objetivo
+
+GALA soporta storage intercambiable. En v0 usamos **Google Drive (personal)** como almacenamiento de assets generados por el renderer (videos e imágenes). El Worker sube y el API descarga/streamea.
+
+### Contrato de almacenamiento
+
+* `provider`: identifica el backend de storage (`gdrive` o `localfs`).
+* `object_key`:
+
+  * en **gdrive**: es el **fileId** de Google Drive (ej. `1VKNZvBw5x9ghUofdIIrxatt4I-O2WWI8`).
+  * en **localfs**: es la ruta relativa dentro de `STORAGE_LOCAL_ROOT`.
+* `mime`: tipo MIME almacenado en DB (ej. `video/mp4`, `image/jpeg`).
+  **Nota:** en este esquema el campo se llama `mime` (no `content_type`).
+
+### Variables de entorno (Drive)
+
+Para evitar desincronización entre API y Worker, las credenciales deben venir de un **único `.env`** y ser idénticas en ambos servicios:
+
+* `STORAGE_PROVIDER=gdrive`
+* `GDRIVE_CLIENT_ID`
+* `GDRIVE_CLIENT_SECRET`
+* `GDRIVE_REFRESH_TOKEN`
+* `GDRIVE_FOLDER_ID` (opcional)
+
+### Flujo
+
+1. API crea `job` → encola en Redis
+2. Worker consume job → pide render al renderer → recibe rutas locales (`/data/...`)
+3. Worker sube assets a Drive → guarda `provider=gdrive`, `object_key=<fileId>`, `mime=...`
+4. API sirve `GET /assets/{id}/content` → descarga desde Drive por `fileId` → stream al cliente
+
+### Checklist de validación
+
+* `smoke-test.ps1` debe terminar con:
+
+  * `Smoke test OK`
+  * `hello.mp4` y `hello.jpg` descargados
+* En DB:
+
+  * `assets.provider = gdrive`
+  * `assets.object_key` es un `fileId` válido
+  * `assets.mime` correcto
+
+---
+
+## Punto 3 — Cleanup (primero)
+
+### Objetivo del cleanup
+
+Una vez que el Worker sube exitosamente el archivo a Drive y lo registra en DB, debe **borrar el archivo local** en `/data` para:
+
+* no crecer disco
+* evitar basura en reinicios
+* mantener `data` como staging temporal
+
+### Regla de oro (para no romper el sistema)
+
+* **Solo borrar después** de:
+
+  1. upload OK (tenemos `fileId`)
+  2. insert en DB OK (asset creado)
+
+Si falla upload o DB → **no borrar**.
+
+---
+
+## Implementación (mínima, segura)
+
+### Cambio 1: habilitar cleanup por feature flag
+
+Agrega variable:
+
+* `WORKER_CLEANUP_LOCAL=1`
+
+en `infra/.env` o `docker-compose.yml` (solo en worker).
+
+### Cambio 2: función helper en Worker para borrar
+
+En el Worker, justo después de crear el asset en DB, si `WORKER_CLEANUP_LOCAL=1`:
+
+* si el `provider` es `gdrive` (o si el output viene de `/data`)
+* borrar el archivo local (`os.Remove(path)`)
+
+### Cambio 3: log claro
+
+Que el worker loguee:
+
+* `cleanup ok path=/data/...`
+  o
+* `cleanup skipped reason=...`
+  o
+* `cleanup failed err=...` (pero el job igual queda DONE si ya subió)
+
+---
+
+## Docker: lo mínimo para activar cleanup
+
+En `infra/.env`:
+
+```env
+WORKER_CLEANUP_LOCAL=1
+```
+
+y en el servicio `worker`:
+
+```yaml
+WORKER_CLEANUP_LOCAL: "${WORKER_CLEANUP_LOCAL}"
+```
+
+---

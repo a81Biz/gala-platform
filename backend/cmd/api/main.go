@@ -8,16 +8,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"gala/internal/adapters/storage/localfs"
 	"gala/internal/httpapi"
 	"gala/internal/httpapi/util"
+	"gala/internal/storage"
 )
 
 func main() {
 	httpPort := util.Env("HTTP_PORT", "8080")
 	dbURL := util.MustEnv("DATABASE_URL")
 	redisAddr := util.MustEnv("REDIS_ADDR")
-	storageRoot := util.Env("STORAGE_LOCAL_ROOT", "/data")
 
 	ctx := context.Background()
 
@@ -30,7 +29,10 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	defer rdb.Close()
 
-	sp := localfs.New(storageRoot)
+	sp, err := storage.NewProvider()
+	if err != nil {
+		panic(err)
+	}
 
 	deps := httpapi.Deps{
 		Pool: pool,

@@ -73,10 +73,11 @@ func (h *Handler) PostAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createdAt := time.Now().UTC()
+	provider := h.sp.Provider()
 	_, err = h.pool.Exec(ctx,
 		`INSERT INTO assets (id, kind, provider, object_key, mime, size_bytes, label, created_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		assetID, kind, "localfs", objectKey, contentType, out.Size, nullIfEmpty(label), createdAt,
+		assetID, kind, provider, out.ObjectKey, contentType, out.Size, nullIfEmpty(label), createdAt,
 	)
 	if err != nil {
 		httpkit.WriteErr(w, 500, "INTERNAL_ERROR", "db insert asset failed", nil)
@@ -87,8 +88,8 @@ func (h *Handler) PostAsset(w http.ResponseWriter, r *http.Request) {
 		"asset": map[string]any{
 			"id":         assetID,
 			"kind":       kind,
-			"provider":   "localfs",
-			"object_key": objectKey,
+			"provider":   provider,
+			"object_key": out.ObjectKey,
 			"mime":       contentType,
 			"size_bytes": out.Size,
 			"label":      label,

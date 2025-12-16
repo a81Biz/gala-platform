@@ -18,6 +18,7 @@ func Run(ctx context.Context, d Deps) error {
 		Pool:        d.Pool,
 		Renderer:    rc,
 		StorageRoot: d.StorageRoot,
+		SP:          d.SP,
 	})
 
 	for {
