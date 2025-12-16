@@ -1,0 +1,124 @@
+@echo off
+echo ---------------------------------------------------
+echo Generando estructura de proyecto GALA-PLATFORM...
+echo ---------------------------------------------------
+
+:: 1. Crear carpeta raiz y entrar en ella
+mkdir gala-platform
+cd gala-platform
+
+:: ---------------------------------------------------
+:: 2. CARPETA DOCS
+:: ---------------------------------------------------
+echo Creando Docs...
+mkdir docs
+type nul > docs\00-single-source-of-truth.md
+type nul > docs\01-diagrama-tecnico.md
+type nul > docs\02-api-contract-v0.md
+
+:: ---------------------------------------------------
+:: 3. CARPETA INFRA
+:: ---------------------------------------------------
+echo Creando Infra...
+mkdir infra\postgres
+type nul > infra\docker-compose.yml
+type nul > infra\.env.example
+type nul > infra\postgres\init.sql
+
+:: ---------------------------------------------------
+:: 4. CARPETA FRONTEND
+:: ---------------------------------------------------
+echo Creando Frontend...
+mkdir frontend\src\app
+mkdir frontend\src\providers
+mkdir frontend\src\features\models
+mkdir frontend\src\features\components
+mkdir frontend\src\features\hooks
+mkdir frontend\src\features\pages
+mkdir frontend\src\features\templates
+mkdir frontend\src\features\jobs
+mkdir frontend\src\features\assets
+mkdir frontend\src\features\library
+mkdir frontend\src\shared\api
+mkdir frontend\src\shared\components
+mkdir frontend\src\shared\utils
+mkdir frontend\src\shared\types
+mkdir frontend\src\shared\styles
+
+:: Archivos raiz frontend
+type nul > frontend\Dockerfile
+type nul > frontend\package.json
+type nul > frontend\vite.config.ts
+
+:: Archivos dentro de src
+type nul > frontend\src\app\App.tsx
+type nul > frontend\src\app\routes.tsx
+type nul > frontend\src\features\models\api.ts
+type nul > frontend\src\shared\styles\index.css
+
+:: ---------------------------------------------------
+:: 5. CARPETA BACKEND
+:: ---------------------------------------------------
+echo Creando Backend...
+:: Estructura de carpetas
+mkdir backend\cmd\api
+mkdir backend\cmd\worker
+mkdir backend\internal\config
+mkdir backend\internal\http\middleware
+mkdir backend\internal\http\handlers\health
+mkdir backend\internal\http\handlers\assets
+mkdir backend\internal\http\handlers\models
+mkdir backend\internal\http\handlers\templates
+mkdir backend\internal\http\handlers\jobs
+mkdir backend\internal\domain\asset
+mkdir backend\internal\domain\model
+mkdir backend\internal\domain\template
+mkdir backend\internal\domain\job
+mkdir backend\internal\usecase\assets
+mkdir backend\internal\usecase\models
+mkdir backend\internal\usecase\templates
+mkdir backend\internal\usecase\jobs
+mkdir backend\internal\ports
+mkdir backend\internal\adapters\db
+mkdir backend\internal\adapters\queue
+mkdir backend\internal\adapters\storage
+mkdir backend\internal\adapters\renderer
+mkdir backend\internal\pkg
+mkdir backend\migrations
+
+:: Archivos raiz backend
+type nul > backend\Dockerfile
+type nul > backend\go.mod
+
+:: Archivos de codigo backend
+type nul > backend\cmd\api\main.go
+type nul > backend\cmd\worker\main.go
+type nul > backend\internal\http\router.go
+type nul > backend\migrations\001_init.sql
+
+:: ---------------------------------------------------
+:: 6. CARPETA RENDERER
+:: ---------------------------------------------------
+echo Creando Renderer...
+mkdir renderer\scripts\ffmpeg
+mkdir renderer\templates
+
+type nul > renderer\Dockerfile
+type nul > renderer\scripts\render.sh
+type nul > renderer\scripts\ffmpeg\compose.sh
+type nul > renderer\scripts\ffmpeg\captions.sh
+type nul > renderer\scripts\ffmpeg\thumbnail.sh
+type nul > renderer\templates\hello_render.json
+
+:: ---------------------------------------------------
+:: 7. CARPETA STORAGE
+:: ---------------------------------------------------
+echo Creando Storage...
+mkdir storage\local\assets
+mkdir storage\local\renders
+
+echo ---------------------------------------------------
+echo !LISTO! Estructura generada correctamente en:
+echo %CD%
+echo ---------------------------------------------------
+pause
