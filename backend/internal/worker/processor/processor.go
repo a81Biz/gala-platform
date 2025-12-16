@@ -3,9 +3,11 @@ package processor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,22 +22,27 @@ type Deps struct {
 	Pool        *pgxpool.Pool
 	Renderer    renderer.Client
 	StorageRoot string
-	SP          ports.StorageProvider
+	// Feature flag: when enabled, worker cleans up local staging under StorageRoot
+	// after upload+DB insert have succeeded.
+	CleanupLocal bool
+	SP           ports.StorageProvider
 }
 
 type Processor struct {
-	pool        *pgxpool.Pool
-	renderer    renderer.Client
-	storageRoot string
-	sp          ports.StorageProvider
+	pool         *pgxpool.Pool
+	renderer     renderer.Client
+	storageRoot  string
+	cleanupLocal bool
+	sp           ports.StorageProvider
 }
 
 func New(d Deps) *Processor {
 	return &Processor{
-		pool:        d.Pool,
-		renderer:    d.Renderer,
-		storageRoot: d.StorageRoot,
-		sp:          d.SP,
+		pool:         d.Pool,
+		renderer:     d.Renderer,
+		storageRoot:  d.StorageRoot,
+		cleanupLocal: d.CleanupLocal,
+		sp:           d.SP,
 	}
 }
 
@@ -91,6 +98,10 @@ func (p *Processor) ProcessJob(ctx context.Context, jobID string) error {
 		return err
 	}
 
+	// Best-effort: after the assets were uploaded+recorded, try to remove the job folder
+	// (renders/<jobId>) ONLY if it's empty. If leftover files exist for any reason, keep it.
+	p.maybeCleanupJobFolder(jobID)
+
 	_, _ = p.pool.Exec(ctx, `UPDATE jobs SET status='DONE', finished_at=NOW() WHERE id=$1`, jobID)
 	fmt.Printf("job DONE %s (video=%d bytes, thumb=%d bytes)\n", jobID, videoSize, thumbSize)
 	return nil
@@ -137,7 +148,60 @@ func (p *Processor) registerAssetFromLocalFile(
 		return "", 0, err
 	}
 
+	// Cleanup local file only when:
+	// - feature flag enabled
+	// - provider is gdrive (if provider is localfs, local file IS the storage)
+	p.maybeCleanupLocalFile(localObjectKey)
+
 	return assetID, size, nil
+}
+
+func (p *Processor) maybeCleanupLocalFile(localObjectKey string) {
+	if !p.cleanupLocal {
+		fmt.Println("cleanup skipped reason=flag_off")
+		return
+	}
+	if p.sp.Provider() != "gdrive" {
+		fmt.Println("cleanup skipped reason=provider_not_gdrive provider=" + p.sp.Provider())
+		return
+	}
+
+	localPath := filepath.Join(p.storageRoot, localObjectKey)
+	if err := os.Remove(localPath); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("cleanup ok (already missing) path=" + localPath)
+			return
+		}
+		fmt.Println("cleanup failed path=" + localPath + " err=" + err.Error())
+		return
+	}
+	fmt.Println("cleanup ok path=" + localPath)
+}
+
+func (p *Processor) maybeCleanupJobFolder(jobID string) {
+	if !p.cleanupLocal {
+		return
+	}
+	if p.sp.Provider() != "gdrive" {
+		return
+	}
+
+	jobDir := filepath.Join(p.storageRoot, "renders", jobID)
+	err := os.Remove(jobDir)
+	if err == nil {
+		fmt.Println("cleanup ok dir=" + jobDir)
+		return
+	}
+	if os.IsNotExist(err) {
+		fmt.Println("cleanup ok (dir missing) dir=" + jobDir)
+		return
+	}
+	// If not empty, keep it (this is desired).
+	if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+		fmt.Println("cleanup skipped reason=dir_not_empty dir=" + jobDir)
+		return
+	}
+	fmt.Println("cleanup failed dir=" + jobDir + " err=" + err.Error())
 }
 
 func (p *Processor) failJob(jobID string) {

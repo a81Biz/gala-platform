@@ -15,10 +15,11 @@ func Run(ctx context.Context, d Deps) error {
 	rc := renderer.NewHTTPClient(d.RendererBaseURL)
 
 	p := processor.New(processor.Deps{
-		Pool:        d.Pool,
-		Renderer:    rc,
-		StorageRoot: d.StorageRoot,
-		SP:          d.SP,
+		Pool:         d.Pool,
+		Renderer:     rc,
+		StorageRoot:  d.StorageRoot,
+		CleanupLocal: d.CleanupLocal,
+		SP:           d.SP,
 	})
 
 	for {

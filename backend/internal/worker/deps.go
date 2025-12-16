@@ -14,5 +14,9 @@ type Deps struct {
 	StorageRoot     string
 	QueueName       string
 
+	// Feature flag: if true, the worker will delete local render staging under StorageRoot
+	// after (1) upload OK and (2) DB insert OK. See README Punto 3.
+	CleanupLocal bool
+
 	SP ports.StorageProvider
 }

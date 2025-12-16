@@ -20,6 +20,7 @@ func main() {
 	rendererBaseURL := util.MustEnv("RENDERER_HTTP_BASEURL")
 	storageRoot := util.Env("STORAGE_LOCAL_ROOT", "/data")
 	queueName := util.Env("JOB_QUEUE_NAME", "gala:jobs")
+	cleanupLocal := util.BoolEnv("WORKER_CLEANUP_LOCAL", false)
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
@@ -41,6 +42,7 @@ func main() {
 		RendererBaseURL: rendererBaseURL,
 		StorageRoot:     storageRoot,
 		QueueName:       queueName,
+		CleanupLocal:    cleanupLocal,
 		SP:              sp,
 	}
 

@@ -61,6 +61,11 @@ services:
       JOB_QUEUE_NAME: gala:jobs
       RENDERER_HTTP_BASEURL: http://renderer:9000
 
+      # ---- FEATURE FLAGS ----
+      # Punto 3: cleanup local staging after upload+DB insert.
+      # Default is 0/empty (disabled).
+      WORKER_CLEANUP_LOCAL: "${WORKER_CLEANUP_LOCAL}"
+
       # ---- STORAGE ----
       STORAGE_PROVIDER: gdrive
       STORAGE_LOCAL_ROOT: /data
