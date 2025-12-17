@@ -1,0 +1,167 @@
+# Common
+ErrorEnvelope:
+  $ref: "./common.yaml#/ErrorEnvelope"
+
+# Assets
+AssetKind:
+  $ref: "./assets.yaml#/AssetKind"
+Asset:
+  $ref: "./assets.yaml#/Asset"
+AssetResponse:
+  $ref: "./assets.yaml#/AssetResponse"
+AssetsListResponse:
+  $ref: "./assets.yaml#/AssetsListResponse"
+AssetURLResponse:
+  $ref: "./assets.yaml#/AssetURLResponse"
+
+# Templates
+TemplateFormat:
+  $ref: "./templates.yaml#/TemplateFormat"
+Template:
+  $ref: "./templates.yaml#/Template"
+CreateTemplateRequest:
+  $ref: "./templates.yaml#/CreateTemplateRequest"
+UpdateTemplateRequest:
+  $ref: "./templates.yaml#/UpdateTemplateRequest"
+TemplateResponse:
+  $ref: "./templates.yaml#/TemplateResponse"
+TemplatesListResponse:
+  $ref: "./templates.yaml#/TemplatesListResponse"
+
+# Models (quedan aquí por ahora, inline)
+Model:
+  type: object
+  properties:
+    id: { type: string }
+    stage_name: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+    preset:
+      type: object
+      additionalProperties: true
+    asset_ids:
+      type: array
+      items: { type: string }
+    created_at: { type: string, format: date-time }
+  required: [id, stage_name, created_at]
+
+CreateModelRequest:
+  type: object
+  properties:
+    stage_name: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+    preset:
+      type: object
+      additionalProperties: true
+    asset_ids:
+      type: array
+      items: { type: string }
+  required: [stage_name]
+
+UpdateModelRequest:
+  type: object
+  properties:
+    stage_name: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+    preset:
+      type: object
+      additionalProperties: true
+    asset_ids:
+      type: array
+      items: { type: string }
+
+ModelResponse:
+  type: object
+  properties:
+    model: { $ref: "#/Model" }
+  required: [model]
+
+ModelsListResponse:
+  type: object
+  properties:
+    models:
+      type: array
+      items: { $ref: "#/Model" }
+  required: [models]
+
+# Jobs (quedan aquí por ahora, inline)
+JobOutput:
+  type: object
+  properties:
+    variant: { type: integer }
+    video_asset_id: { type: string }
+    thumbnail_asset_id: { type: string }
+  required: [variant, video_asset_id]
+
+Job:
+  type: object
+  properties:
+    id: { type: string }
+    name: { type: string, nullable: true }
+    status:
+      type: string
+      enum: [QUEUED, RUNNING, DONE, FAILED]
+    template_id: { type: string }
+    model_ids:
+      type: array
+      items: { type: string }
+    params:
+      type: object
+      additionalProperties: true
+    created_at: { type: string, format: date-time }
+    started_at: { type: string, format: date-time, nullable: true }
+    finished_at: { type: string, format: date-time, nullable: true }
+  required: [id, status, created_at]
+
+CreateJobRequest:
+  type: object
+  required: [template_id, model_ids]
+  properties:
+    name: { type: string }
+    template_id: { type: string }
+    model_ids:
+      type: array
+      items: { type: string }
+    inputs:
+      type: object
+      additionalProperties: true
+    params:
+      type: object
+      additionalProperties: true
+    output:
+      type: object
+      additionalProperties: true
+
+JobResponse:
+  type: object
+  properties:
+    job: { $ref: "#/Job" }
+  required: [job]
+
+JobsListResponse:
+  type: object
+  properties:
+    jobs:
+      type: array
+      items: { $ref: "#/Job" }
+  required: [jobs]
+
+JobDetail:
+  allOf:
+    - $ref: "#/Job"
+    - type: object
+      properties:
+        outputs:
+          type: array
+          items: { $ref: "#/JobOutput" }
+
+JobDetailResponse:
+  type: object
+  properties:
+    job: { $ref: "#/JobDetail" }
+  required: [job]

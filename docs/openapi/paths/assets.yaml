@@ -1,0 +1,152 @@
+post:
+  tags: [Assets]
+  summary: Upload asset (multipart)
+  operationId: uploadAsset
+  description: >
+    Upload de un asset. La API lo recibe, lo sube al storage provider (ej. Google Drive)
+    y registra el asset en DB.
+  requestBody:
+    required: true
+    content:
+      multipart/form-data:
+        schema:
+          type: object
+          properties:
+            file:
+              type: string
+              format: binary
+            kind:
+              $ref: "../schemas/index.yaml#/AssetKind"
+            label:
+              type: string
+              description: Etiqueta opcional para facilitar búsqueda/uso.
+          required: [file, kind]
+  responses:
+    "201":
+      description: Created
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/AssetResponse"
+    "400":
+      $ref: "../responses.yaml#/ValidationError"
+    "413":
+      $ref: "../responses.yaml#/PayloadTooLarge"
+    "500":
+      $ref: "../responses.yaml#/InternalError"
+
+get:
+  tags: [Assets]
+  summary: List assets
+  operationId: listAssets
+  parameters:
+    - in: query
+      name: kind
+      schema:
+        $ref: "../schemas/index.yaml#/AssetKind"
+    - in: query
+      name: q
+      schema:
+        type: string
+      description: Búsqueda libre (label, etc.)
+    - in: query
+      name: limit
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    - in: query
+      name: offset
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+  responses:
+    "200":
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/AssetsListResponse"
+    "500":
+      $ref: "../responses.yaml#/InternalError"
+
+assetById:
+  get:
+    tags: [Assets]
+    summary: Get asset metadata
+    operationId: getAsset
+    parameters:
+      - $ref: "../parameters.yaml#/assetId"
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/AssetResponse"
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+  delete:
+    tags: [Assets]
+    summary: Delete asset
+    operationId: deleteAsset
+    description: >
+      v0: Elimina el registro del asset (comportamiento exacto definido por implementación).
+      En v0 no garantiza borrar el archivo del provider.
+    parameters:
+      - $ref: "../parameters.yaml#/assetId"
+    responses:
+      "204":
+        description: Deleted
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "409":
+        $ref: "../responses.yaml#/Conflict"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+assetURL:
+  get:
+    tags: [Assets]
+    summary: Get asset download URL (v0)
+    operationId: getAssetURL
+    description: >
+      v0: Puede devolver una URL de proxy local o un signed URL dependiendo del provider.
+    parameters:
+      - $ref: "../parameters.yaml#/assetId"
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/AssetURLResponse"
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+assetContent:
+  get:
+    tags: [Assets]
+    summary: Stream asset binary content
+    operationId: streamAssetContent
+    parameters:
+      - $ref: "../parameters.yaml#/assetId"
+    responses:
+      "200":
+        description: Binary stream
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"

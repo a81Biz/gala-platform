@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -19,11 +20,9 @@ import (
 )
 
 type Deps struct {
-	Pool        *pgxpool.Pool
-	Renderer    renderer.Client
-	StorageRoot string
-	// Feature flag: when enabled, worker cleans up local staging under StorageRoot
-	// after upload+DB insert have succeeded.
+	Pool         *pgxpool.Pool
+	Renderer     renderer.Client
+	StorageRoot  string
 	CleanupLocal bool
 	SP           ports.StorageProvider
 }
@@ -46,44 +45,74 @@ func New(d Deps) *Processor {
 	}
 }
 
+type parsedJob struct {
+	TemplateID   string
+	Inputs       map[string]string
+	Params       map[string]any
+	MergedParams map[string]any
+	HasEnvelope  bool
+}
+
 func (p *Processor) ProcessJob(ctx context.Context, jobID string) error {
 	var paramsJSON string
 	if err := p.pool.QueryRow(ctx, `SELECT params_json FROM jobs WHERE id=$1`, jobID).Scan(&paramsJSON); err != nil {
-		return fmt.Errorf("job not found: %w", err)
+		e := fmt.Errorf("job not found: %w", err)
+		p.failJob(jobID, e)
+		return e
 	}
 
-	var params map[string]any
-	_ = json.Unmarshal([]byte(paramsJSON), &params)
-
-	_, _ = p.pool.Exec(ctx, `UPDATE jobs SET status='RUNNING', started_at=NOW() WHERE id=$1`, jobID)
-
-	spec := contracts.RendererSpec{JobID: jobID, Params: params}
-	spec.Output.VideoObjectKey = fmt.Sprintf("renders/%s/hello.mp4", jobID)
-	spec.Output.ThumbObjectKey = fmt.Sprintf("renders/%s/hello.jpg", jobID)
-
-	if err := p.renderer.Render(spec); err != nil {
-		p.failJob(jobID)
+	j, err := p.parseJobEnvelope(ctx, paramsJSON)
+	if err != nil {
+		p.failJob(jobID, err)
 		return err
 	}
 
-	// sube a provider (localfs o gdrive) y registra asset apuntando al object_key del provider
-	videoAssetID, videoSize, err := p.registerAssetFromLocalFile(ctx,
-		"render_output",
-		"video/mp4",
-		spec.Output.VideoObjectKey,
-	)
-	if err != nil {
-		p.failJob(jobID)
-		return err
+	_, _ = p.pool.Exec(ctx, `UPDATE jobs SET status='RUNNING', started_at=NOW(), error_text=NULL WHERE id=$1`, jobID)
+
+	videoKey := fmt.Sprintf("renders/%s/hello.mp4", jobID)
+	thumbKey := fmt.Sprintf("renders/%s/hello.jpg", jobID)
+
+	if j.HasEnvelope && len(j.Inputs) > 0 {
+		inputPaths, err := p.materializeInputs(ctx, jobID, j.Inputs)
+		if err != nil {
+			p.failJob(jobID, err)
+			return err
+		}
+
+		specV1 := map[string]any{
+			"job_id":      jobID,
+			"template_id": j.TemplateID,
+			"inputs":      inputPaths,
+			"params":      j.MergedParams,
+			"output": map[string]any{
+				"video_object_key": videoKey,
+				"thumb_object_key": thumbKey,
+			},
+		}
+
+		if err := p.renderer.RenderV1(specV1); err != nil {
+			p.failJob(jobID, err)
+			return err
+		}
+	} else {
+		spec := contracts.RendererSpec{JobID: jobID, Params: j.MergedParams}
+		spec.Output.VideoObjectKey = videoKey
+		spec.Output.ThumbObjectKey = thumbKey
+
+		if err := p.renderer.Render(spec); err != nil {
+			p.failJob(jobID, err)
+			return err
+		}
 	}
 
-	thumbAssetID, thumbSize, err := p.registerAssetFromLocalFile(ctx,
-		"thumbnail",
-		"image/jpeg",
-		spec.Output.ThumbObjectKey,
-	)
+	videoAssetID, _, err := p.registerAssetFromLocalFile(ctx, "render_output", "video/mp4", videoKey)
 	if err != nil {
-		p.failJob(jobID)
+		p.failJob(jobID, err)
+		return err
+	}
+	thumbAssetID, _, err := p.registerAssetFromLocalFile(ctx, "thumbnail", "image/jpeg", thumbKey)
+	if err != nil {
+		p.failJob(jobID, err)
 		return err
 	}
 
@@ -94,26 +123,154 @@ func (p *Processor) ProcessJob(ctx context.Context, jobID string) error {
 		outputID, jobID, videoAssetID, thumbAssetID,
 	)
 	if err != nil {
-		p.failJob(jobID)
+		p.failJob(jobID, err)
 		return err
 	}
 
-	// Best-effort: after the assets were uploaded+recorded, try to remove the job folder
-	// (renders/<jobId>) ONLY if it's empty. If leftover files exist for any reason, keep it.
 	p.maybeCleanupJobFolder(jobID)
 
 	_, _ = p.pool.Exec(ctx, `UPDATE jobs SET status='DONE', finished_at=NOW() WHERE id=$1`, jobID)
-	fmt.Printf("job DONE %s (video=%d bytes, thumb=%d bytes)\n", jobID, videoSize, thumbSize)
 	return nil
 }
 
-func (p *Processor) registerAssetFromLocalFile(
-	ctx context.Context,
-	kind string,
-	mime string,
-	localObjectKey string, // ruta “lógica” usada por renderer en /data
-) (assetID string, size int64, err error) {
+func (p *Processor) parseJobEnvelope(ctx context.Context, paramsJSON string) (*parsedJob, error) {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(paramsJSON), &raw); err != nil {
+		return nil, fmt.Errorf("invalid params_json: %w", err)
+	}
 
+	j := &parsedJob{
+		Inputs:       map[string]string{},
+		Params:       map[string]any{},
+		MergedParams: map[string]any{},
+	}
+
+	if v, ok := raw["template_id"].(string); ok && strings.TrimSpace(v) != "" {
+		j.HasEnvelope = true
+		j.TemplateID = strings.TrimSpace(v)
+
+		if pm, ok := raw["params"].(map[string]any); ok && pm != nil {
+			j.Params = pm
+		}
+
+		if im, ok := raw["inputs"].(map[string]any); ok && im != nil {
+			for k, vv := range im {
+				if s, ok := vv.(string); ok && strings.TrimSpace(s) != "" {
+					j.Inputs[k] = strings.TrimSpace(s)
+				}
+			}
+		}
+
+		var defaultsBytes []byte
+		if err := p.pool.QueryRow(ctx,
+			`SELECT COALESCE(defaults, '{}'::jsonb) FROM templates WHERE id=$1 AND deleted_at IS NULL`,
+			j.TemplateID,
+		).Scan(&defaultsBytes); err != nil {
+			return nil, fmt.Errorf("template not found: %s", j.TemplateID)
+		}
+
+		defaults := map[string]any{}
+		_ = json.Unmarshal(defaultsBytes, &defaults)
+
+		for k, v := range defaults {
+			j.MergedParams[k] = v
+		}
+		for k, v := range j.Params {
+			j.MergedParams[k] = v
+		}
+
+		if t, ok := j.MergedParams["text"].(string); !ok || strings.TrimSpace(t) == "" {
+			return nil, fmt.Errorf("params.text is required (after defaults merge)")
+		}
+		return j, nil
+	}
+
+	for k, v := range raw {
+		j.MergedParams[k] = v
+	}
+	if t, ok := j.MergedParams["text"].(string); !ok || strings.TrimSpace(t) == "" {
+		return nil, fmt.Errorf("params.text is required")
+	}
+	return j, nil
+}
+
+func (p *Processor) materializeInputs(ctx context.Context, jobID string, inputs map[string]string) (map[string]string, error) {
+	out := map[string]string{}
+
+	baseDir := filepath.Join(p.storageRoot, "jobs", jobID, "inputs")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	for inputName, assetID := range inputs {
+		assetID = strings.TrimSpace(assetID)
+		if assetID == "" {
+			continue
+		}
+
+		var objectKey, mime string
+		err := p.pool.QueryRow(ctx, `SELECT object_key, mime FROM assets WHERE id=$1`, assetID).Scan(&objectKey, &mime)
+		if err != nil {
+			return nil, fmt.Errorf("input asset not found input=%s asset_id=%s", inputName, assetID)
+		}
+
+		rc, _, _, err := p.sp.GetObject(ctx, objectKey)
+		if err != nil {
+			return nil, fmt.Errorf("download input failed input=%s asset_id=%s: %w", inputName, assetID, err)
+		}
+		defer rc.Close()
+
+		ext := extFromMime(mime)
+		filename := sanitizeFilename(inputName) + ext
+		localPath := filepath.Join(baseDir, filename)
+
+		f, err := os.Create(localPath)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := io.Copy(f, rc); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		_ = f.Close()
+
+		out[inputName] = localPath
+	}
+
+	return out, nil
+}
+
+func sanitizeFilename(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "..", "")
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "\\", "_")
+	s = strings.ReplaceAll(s, " ", "_")
+	if s == "" {
+		return "input"
+	}
+	return s
+}
+
+func extFromMime(mime string) string {
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	switch mime {
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "audio/wav", "audio/x-wav":
+		return ".wav"
+	case "audio/mpeg", "audio/mp3":
+		return ".mp3"
+	case "video/mp4":
+		return ".mp4"
+	default:
+		return ""
+	}
+}
+
+func (p *Processor) registerAssetFromLocalFile(ctx context.Context, kind string, mime string, localObjectKey string) (assetID string, size int64, err error) {
 	localPath := filepath.Join(p.storageRoot, localObjectKey)
 	st, err := os.Stat(localPath)
 	if err != nil {
@@ -125,7 +282,6 @@ func (p *Processor) registerAssetFromLocalFile(
 	}
 	defer f.Close()
 
-	// subimos al provider actual (localfs o gdrive)
 	out, err := p.sp.PutObject(ctx, ports.PutObjectInput{
 		ObjectKey:   localObjectKey,
 		ContentType: mime,
@@ -148,34 +304,18 @@ func (p *Processor) registerAssetFromLocalFile(
 		return "", 0, err
 	}
 
-	// Cleanup local file only when:
-	// - feature flag enabled
-	// - provider is gdrive (if provider is localfs, local file IS the storage)
 	p.maybeCleanupLocalFile(localObjectKey)
-
 	return assetID, size, nil
 }
 
 func (p *Processor) maybeCleanupLocalFile(localObjectKey string) {
 	if !p.cleanupLocal {
-		fmt.Println("cleanup skipped reason=flag_off")
 		return
 	}
 	if p.sp.Provider() != "gdrive" {
-		fmt.Println("cleanup skipped reason=provider_not_gdrive provider=" + p.sp.Provider())
 		return
 	}
-
-	localPath := filepath.Join(p.storageRoot, localObjectKey)
-	if err := os.Remove(localPath); err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("cleanup ok (already missing) path=" + localPath)
-			return
-		}
-		fmt.Println("cleanup failed path=" + localPath + " err=" + err.Error())
-		return
-	}
-	fmt.Println("cleanup ok path=" + localPath)
+	_ = os.Remove(filepath.Join(p.storageRoot, localObjectKey))
 }
 
 func (p *Processor) maybeCleanupJobFolder(jobID string) {
@@ -188,24 +328,24 @@ func (p *Processor) maybeCleanupJobFolder(jobID string) {
 
 	jobDir := filepath.Join(p.storageRoot, "renders", jobID)
 	err := os.Remove(jobDir)
-	if err == nil {
-		fmt.Println("cleanup ok dir=" + jobDir)
+	if err == nil || os.IsNotExist(err) {
 		return
 	}
-	if os.IsNotExist(err) {
-		fmt.Println("cleanup ok (dir missing) dir=" + jobDir)
-		return
-	}
-	// If not empty, keep it (this is desired).
 	if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
-		fmt.Println("cleanup skipped reason=dir_not_empty dir=" + jobDir)
 		return
 	}
-	fmt.Println("cleanup failed dir=" + jobDir + " err=" + err.Error())
 }
 
-func (p *Processor) failJob(jobID string) {
-	_, _ = p.pool.Exec(context.Background(), `UPDATE jobs SET status='FAILED', finished_at=NOW() WHERE id=$1`, jobID)
+func (p *Processor) failJob(jobID string, cause error) {
+	msg := ""
+	if cause != nil {
+		msg = cause.Error()
+		if len(msg) > 2000 {
+			msg = msg[:2000]
+		}
+	}
+	_, _ = p.pool.Exec(context.Background(),
+		`UPDATE jobs SET status='FAILED', finished_at=NOW(), error_text=$2 WHERE id=$1`,
+		jobID, msg,
+	)
 }
-
-var _ = time.Now

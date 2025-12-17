@@ -1,0 +1,208 @@
+/health:
+  get:
+    tags: [Health]
+    summary: Health check
+    operationId: health
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string }
+                service: { type: string }
+                version: { type: string }
+              required: [status, service, version]
+
+/assets:
+  $ref: "./assets.yaml"
+
+/assets/{assetId}:
+  $ref: "./assets.yaml#/assetById"
+
+/assets/{assetId}/url:
+  $ref: "./assets.yaml#/assetURL"
+
+/assets/{assetId}/content:
+  $ref: "./assets.yaml#/assetContent"
+
+/templates:
+  $ref: "./templates.yaml"
+
+/templates/{templateId}:
+  $ref: "./templates.yaml#/templateById"
+
+/models:
+  post:
+    tags: [Models]
+    summary: Create model (avatar profile)
+    operationId: createModel
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/CreateModelRequest"
+    responses:
+      "201":
+        description: Created
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/ModelResponse"
+      "400":
+        $ref: "../responses.yaml#/ValidationError"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+  get:
+    tags: [Models]
+    summary: List models
+    operationId: listModels
+    parameters:
+      - in: query
+        name: q
+        schema: { type: string }
+      - in: query
+        name: tag
+        schema: { type: string }
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/ModelsListResponse"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+/models/{modelId}:
+  get:
+    tags: [Models]
+    summary: Get model
+    operationId: getModel
+    parameters:
+      - $ref: "../parameters.yaml#/modelId"
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/ModelResponse"
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+  patch:
+    tags: [Models]
+    summary: Update model (partial)
+    operationId: updateModel
+    parameters:
+      - $ref: "../parameters.yaml#/modelId"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/UpdateModelRequest"
+    responses:
+      "200":
+        description: Updated
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/ModelResponse"
+      "400":
+        $ref: "../responses.yaml#/ValidationError"
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+  delete:
+    tags: [Models]
+    summary: Delete model
+    operationId: deleteModel
+    parameters:
+      - $ref: "../parameters.yaml#/modelId"
+    responses:
+      "204":
+        description: Deleted
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "409":
+        $ref: "../responses.yaml#/Conflict"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+/jobs:
+  post:
+    tags: [Jobs]
+    summary: Create render job (batch)
+    operationId: createJob
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/CreateJobRequest"
+    responses:
+      "201":
+        description: Created
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/JobResponse"
+      "400":
+        $ref: "../responses.yaml#/ValidationError"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+  get:
+    tags: [Jobs]
+    summary: List jobs
+    operationId: listJobs
+    parameters:
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum: [QUEUED, RUNNING, DONE, FAILED]
+      - in: query
+        name: template_id
+        schema: { type: string }
+      - in: query
+        name: model_id
+        schema: { type: string }
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/JobsListResponse"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+/jobs/{jobId}:
+  get:
+    tags: [Jobs]
+    summary: Get job details (including outputs if DONE)
+    operationId: getJob
+    parameters:
+      - $ref: "../parameters.yaml#/jobId"
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/JobDetailResponse"
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gala/internal/httpapi/util"
@@ -17,8 +16,10 @@ import (
 )
 
 type CreateJobRequest struct {
-	Name   string         `json:"name"`
-	Params map[string]any `json:"params"`
+	Name       string            `json:"name"`
+	TemplateID string            `json:"template_id,omitempty"`
+	Inputs     map[string]string `json:"inputs,omitempty"`
+	Params     map[string]any    `json:"params"`
 }
 
 func (h *Handler) PostJob(w http.ResponseWriter, r *http.Request) {
@@ -29,23 +30,49 @@ func (h *Handler) PostJob(w http.ResponseWriter, r *http.Request) {
 		httpkit.WriteErr(w, 400, "VALIDATION_ERROR", "invalid json body", nil)
 		return
 	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.TemplateID = strings.TrimSpace(req.TemplateID)
+
 	if req.Params == nil {
 		req.Params = map[string]any{}
 	}
+	if req.Inputs == nil {
+		req.Inputs = map[string]string{}
+	}
 
-	if _, ok := req.Params["text"]; !ok {
-		httpkit.WriteErr(w, 400, "VALIDATION_ERROR", "params.text is required", map[string]any{"field": "params.text"})
-		return
+	// Legacy path stays stable
+	if req.TemplateID == "" {
+		if _, ok := req.Params["text"]; !ok {
+			httpkit.WriteErr(w, 400, "VALIDATION_ERROR", "params.text is required", map[string]any{"field": "params.text"})
+			return
+		}
+	} else {
+		var tmp string
+		err := h.pool.QueryRow(ctx, `SELECT id FROM templates WHERE id=$1 AND deleted_at IS NULL`, req.TemplateID).Scan(&tmp)
+		if err != nil {
+			httpkit.WriteErr(w, 404, "TEMPLATE_NOT_FOUND", "template not found", map[string]any{"template_id": req.TemplateID})
+			return
+		}
 	}
 
 	jobID := util.NewID("job")
-	paramsBytes, _ := json.Marshal(req.Params)
+
+	var toStore any = req.Params
+	if req.TemplateID != "" {
+		toStore = map[string]any{
+			"template_id": req.TemplateID,
+			"inputs":      req.Inputs,
+			"params":      req.Params,
+		}
+	}
+	paramsBytes, _ := json.Marshal(toStore)
 
 	createdAt := time.Now().UTC()
 	_, err := h.pool.Exec(ctx,
 		`INSERT INTO jobs (id, name, status, params_json, created_at)
 		 VALUES ($1,$2,'QUEUED',$3,$4)`,
-		jobID, nullIfEmpty(strings.TrimSpace(req.Name)), string(paramsBytes), createdAt,
+		jobID, nullIfEmpty(req.Name), string(paramsBytes), createdAt,
 	)
 	if err != nil {
 		httpkit.WriteErr(w, 500, "INTERNAL_ERROR", "db insert failed", nil)
@@ -57,15 +84,21 @@ func (h *Handler) PostJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpkit.WriteJSON(w, 201, map[string]any{
-		"job": map[string]any{
-			"id":         jobID,
-			"name":       req.Name,
-			"status":     "QUEUED",
-			"params":     req.Params,
-			"created_at": createdAt,
-		},
-	})
+	respJob := map[string]any{
+		"id":         jobID,
+		"name":       req.Name,
+		"status":     "QUEUED",
+		"params":     req.Params,
+		"created_at": createdAt,
+	}
+	if req.TemplateID != "" {
+		respJob["template_id"] = req.TemplateID
+		if len(req.Inputs) > 0 {
+			respJob["inputs"] = req.Inputs
+		}
+	}
+
+	httpkit.WriteJSON(w, 201, map[string]any{"job": respJob})
 }
 
 func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
@@ -134,22 +167,43 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		id, name, status, paramsJSON string
+		errorText                    *string
 		createdAt                    time.Time
 		startedAt, finishedAt        *time.Time
 	)
 
 	err := h.pool.QueryRow(ctx,
-		`SELECT id, COALESCE(name,''), status, params_json, created_at, started_at, finished_at
+		`SELECT id, COALESCE(name,''), status, params_json, error_text, created_at, started_at, finished_at
 		 FROM jobs WHERE id=$1`,
 		jobID,
-	).Scan(&id, &name, &status, &paramsJSON, &createdAt, &startedAt, &finishedAt)
+	).Scan(&id, &name, &status, &paramsJSON, &errorText, &createdAt, &startedAt, &finishedAt)
 	if err != nil {
 		httpkit.WriteErr(w, 404, "JOB_NOT_FOUND", "job not found", map[string]any{"job_id": jobID})
 		return
 	}
 
-	var params map[string]any
-	_ = json.Unmarshal([]byte(paramsJSON), &params)
+	var raw map[string]any
+	_ = json.Unmarshal([]byte(paramsJSON), &raw)
+
+	templateID := ""
+	params := map[string]any{}
+	inputs := map[string]string{}
+
+	if v, ok := raw["template_id"].(string); ok && strings.TrimSpace(v) != "" {
+		templateID = strings.TrimSpace(v)
+		if m, ok := raw["params"].(map[string]any); ok && m != nil {
+			params = m
+		}
+		if im, ok := raw["inputs"].(map[string]any); ok && im != nil {
+			for k, vv := range im {
+				if s, ok := vv.(string); ok && strings.TrimSpace(s) != "" {
+					inputs[k] = strings.TrimSpace(s)
+				}
+			}
+		}
+	} else {
+		params = raw
+	}
 
 	type outItem struct {
 		Variant           int    `json:"variant"`
@@ -162,7 +216,6 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	outs := []outItem{}
-
 	rows, err := h.pool.Query(ctx,
 		`SELECT variant, video_asset_id, COALESCE(thumbnail_asset_id,''), COALESCE(captions_asset_id,'')
 		 FROM job_outputs WHERE job_id=$1 ORDER BY variant ASC`,
@@ -201,18 +254,27 @@ func (h *Handler) GetJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	httpkit.WriteJSON(w, 200, map[string]any{
-		"job": map[string]any{
-			"id":          id,
-			"name":        name,
-			"status":      status,
-			"params":      params,
-			"created_at":  createdAt,
-			"started_at":  startedAt,
-			"finished_at": finishedAt,
-			"outputs":     outs,
-		},
-	})
+	job := map[string]any{
+		"id":          id,
+		"name":        name,
+		"status":      status,
+		"params":      params,
+		"created_at":  createdAt,
+		"started_at":  startedAt,
+		"finished_at": finishedAt,
+		"outputs":     outs,
+	}
+	if errorText != nil && strings.TrimSpace(*errorText) != "" {
+		job["error"] = strings.TrimSpace(*errorText)
+	}
+	if templateID != "" {
+		job["template_id"] = templateID
+		if len(inputs) > 0 {
+			job["inputs"] = inputs
+		}
+	}
+
+	httpkit.WriteJSON(w, 200, map[string]any{"job": job})
 }
 
 func lookupObjectKey(ctx context.Context, pool *pgxpool.Pool, assetID string) string {
@@ -229,4 +291,3 @@ type pgxRows interface {
 	Next() bool
 	Scan(dest ...any) error
 }
-

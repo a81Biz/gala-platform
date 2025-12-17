@@ -1,0 +1,49 @@
+AssetKind:
+  type: string
+  enum:
+    - source_video
+    - avatar_input
+    - music
+    - render_output
+    - thumbnail
+    - overlay
+    - background
+    - other
+
+Asset:
+  type: object
+  properties:
+    id: { type: string }
+    kind: { $ref: "#/AssetKind" }
+    provider: { type: string }
+    object_key:
+      type: string
+      description: Provider object key (Google Drive fileId for gdrive)
+    mime: { type: string }
+    size_bytes: { type: integer }
+    checksum: { type: string, nullable: true }
+    label: { type: string, nullable: true }
+    created_at: { type: string, format: date-time }
+  required: [id, kind, provider, object_key, mime, size_bytes, created_at]
+
+AssetResponse:
+  type: object
+  properties:
+    asset: { $ref: "#/Asset" }
+  required: [asset]
+
+AssetsListResponse:
+  type: object
+  properties:
+    assets:
+      type: array
+      items: { $ref: "#/Asset" }
+  required: [assets]
+
+AssetURLResponse:
+  type: object
+  properties:
+    asset_id: { type: string }
+    url: { type: string }
+    expires_at: { type: string, format: date-time, nullable: true }
+  required: [asset_id, url]

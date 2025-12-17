@@ -1,0 +1,23 @@
+assetId:
+  name: assetId
+  in: path
+  required: true
+  schema: { type: string }
+
+modelId:
+  name: modelId
+  in: path
+  required: true
+  schema: { type: string }
+
+templateId:
+  name: templateId
+  in: path
+  required: true
+  schema: { type: string }
+
+jobId:
+  name: jobId
+  in: path
+  required: true
+  schema: { type: string }

@@ -1,0 +1,98 @@
+post:
+  tags: [Templates]
+  summary: Create template
+  operationId: createTemplate
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: "../schemas/index.yaml#/CreateTemplateRequest"
+  responses:
+    "201":
+      description: Template created
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/TemplateResponse"
+    "400":
+      $ref: "../responses.yaml#/ValidationError"
+    "409":
+      $ref: "../responses.yaml#/Conflict"
+    "500":
+      $ref: "../responses.yaml#/InternalError"
+
+get:
+  tags: [Templates]
+  summary: List templates
+  operationId: listTemplates
+  responses:
+    "200":
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/TemplatesListResponse"
+    "500":
+      $ref: "../responses.yaml#/InternalError"
+
+templateById:
+  get:
+    tags: [Templates]
+    summary: Get template
+    operationId: getTemplate
+    parameters:
+      - $ref: "../parameters.yaml#/templateId"
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/TemplateResponse"
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+  patch:
+    tags: [Templates]
+    summary: Update template
+    operationId: updateTemplate
+    parameters:
+      - $ref: "../parameters.yaml#/templateId"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/index.yaml#/UpdateTemplateRequest"
+    responses:
+      "200":
+        description: Updated
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/index.yaml#/TemplateResponse"
+      "400":
+        $ref: "../responses.yaml#/ValidationError"
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "409":
+        $ref: "../responses.yaml#/Conflict"
+      "500":
+        $ref: "../responses.yaml#/InternalError"
+
+  delete:
+    tags: [Templates]
+    summary: Delete template
+    operationId: deleteTemplate
+    parameters:
+      - $ref: "../parameters.yaml#/templateId"
+    responses:
+      "204":
+        description: Deleted
+      "404":
+        $ref: "../responses.yaml#/NotFound"
+      "500":
+        $ref: "../responses.yaml#/InternalError"

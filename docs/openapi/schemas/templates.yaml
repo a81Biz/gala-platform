@@ -1,0 +1,67 @@
+TemplateFormat:
+  type: object
+  properties:
+    width: { type: integer }
+    height: { type: integer }
+    fps: { type: integer }
+  required: [width, height, fps]
+
+Template:
+  type: object
+  properties:
+    id: { type: string }
+    type: { type: string }
+    name: { type: string }
+    duration_ms: { type: integer, nullable: true }
+    format: { $ref: "#/TemplateFormat" }
+    params_schema:
+      type: object
+      additionalProperties: true
+    defaults:
+      type: object
+      additionalProperties: true
+    created_at: { type: string, format: date-time }
+  required: [id, type, name, created_at]
+
+CreateTemplateRequest:
+  type: object
+  required: [type, name]
+  properties:
+    type: { type: string }
+    name: { type: string }
+    duration_ms: { type: integer, nullable: true }
+    format: { $ref: "#/TemplateFormat" }
+    params_schema:
+      type: object
+      additionalProperties: true
+    defaults:
+      type: object
+      additionalProperties: true
+
+UpdateTemplateRequest:
+  type: object
+  properties:
+    type: { type: string }
+    name: { type: string }
+    duration_ms: { type: integer, nullable: true }
+    format: { $ref: "#/TemplateFormat" }
+    params_schema:
+      type: object
+      additionalProperties: true
+    defaults:
+      type: object
+      additionalProperties: true
+
+TemplateResponse:
+  type: object
+  properties:
+    template: { $ref: "#/Template" }
+  required: [template]
+
+TemplatesListResponse:
+  type: object
+  properties:
+    templates:
+      type: array
+      items: { $ref: "#/Template" }
+  required: [templates]

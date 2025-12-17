@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   params_json  TEXT NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   started_at   TIMESTAMPTZ NULL,
-  finished_at  TIMESTAMPTZ NULL
+  finished_at  TIMESTAMPTZ NULL,
+  error_text   TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS job_outputs (
@@ -32,6 +33,23 @@ CREATE TABLE IF NOT EXISTS job_outputs (
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ✅ TEMPLATES (Punto 4.1)
+CREATE TABLE IF NOT EXISTS templates (
+  id           TEXT PRIMARY KEY,
+  type         TEXT NOT NULL,
+  name         TEXT NOT NULL UNIQUE,
+  duration_ms  INT NULL,
+  format       JSONB NULL,
+  params_schema JSONB NULL,
+  defaults     JSONB NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at   TIMESTAMPTZ NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_assets_kind ON assets(kind);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_job_outputs_job_id ON job_outputs(job_id);
+
+CREATE INDEX IF NOT EXISTS idx_templates_active
+  ON templates (created_at)
+  WHERE deleted_at IS NULL;

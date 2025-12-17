@@ -30,6 +30,7 @@ services:
       HTTP_PORT: "8080"
       DATABASE_URL: postgres://gala:gala@postgres:5432/gala
       REDIS_ADDR: redis:6379
+      CORS_ALLOWED_ORIGINS: "http://localhost:8081,http://localhost:5173"
 
       # ---- STORAGE ----
       STORAGE_PROVIDER: gdrive
@@ -93,6 +94,37 @@ services:
       - data:/data
     ports:
       - "9000:9000"
+
+  # ✅ Genera un v0.bundled.yaml (resuelve $ref) dentro del mismo volumen montado
+  swagger-bundle:
+    image: node:20-alpine
+    container_name: gala-swagger-bundle
+    working_dir: /work
+    command: >
+      sh -lc "
+        ls -l /work &&
+        test -f /work/v0.yaml ||
+          (echo 'ERROR: v0.yaml not found in /work' && exit 1) &&
+        npm -s i -g @redocly/cli@latest >/dev/null 2>&1 &&
+        redocly bundle /work/v0.yaml -o /work/v0.bundled.yaml --ext yaml &&
+        echo '[swagger-bundle] wrote /work/v0.bundled.yaml' &&
+        tail -f /dev/null
+      "
+    volumes:
+      - ../docs/openapi:/work
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    container_name: gala-swagger-ui
+    environment:
+      SWAGGER_JSON: /spec/v0.bundled.yaml
+    volumes:
+      - ../docs/openapi:/spec:ro
+    ports:
+      - "8081:8080"
+    depends_on:
+      - swagger-bundle
+
 
 volumes:
   pgdata:

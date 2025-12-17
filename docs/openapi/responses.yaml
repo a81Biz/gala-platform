@@ -1,0 +1,34 @@
+ValidationError:
+  description: Validation error
+  content:
+    application/json:
+      schema:
+        $ref: "./schemas/index.yaml#/ErrorEnvelope"
+
+NotFound:
+  description: Not found
+  content:
+    application/json:
+      schema:
+        $ref: "./schemas/index.yaml#/ErrorEnvelope"
+
+Conflict:
+  description: Conflict
+  content:
+    application/json:
+      schema:
+        $ref: "./schemas/index.yaml#/ErrorEnvelope"
+
+InternalError:
+  description: Internal error
+  content:
+    application/json:
+      schema:
+        $ref: "./schemas/index.yaml#/ErrorEnvelope"
+
+PayloadTooLarge:
+  description: Payload too large
+  content:
+    application/json:
+      schema:
+        $ref: "./schemas/index.yaml#/ErrorEnvelope"

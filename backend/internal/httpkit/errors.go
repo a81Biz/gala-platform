@@ -14,3 +14,13 @@ func IsUndefinedTable(err error) bool {
 	}
 	return false
 }
+
+// IsUniqueViolation returns true if the error is a PostgreSQL unique constraint violation.
+// 23505 = unique_violation
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
+}
