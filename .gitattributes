@@ -1,0 +1,5 @@
+# Force LF for shell scripts (Docker/Linux)
+*.sh text eol=lf
+
+*.py text eol=lf
+Dockerfile* text eol=lf

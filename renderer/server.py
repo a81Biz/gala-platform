@@ -55,6 +55,7 @@ def _to_v0_from_v1(spec_v1: dict) -> dict:
         "output": {
             "video_object_key": output.get("video_object_key", ""),
             "thumb_object_key": output.get("thumb_object_key", ""),
+            "captions_object_key": output.get("captions_object_key", ""),
         },
     }
 
@@ -68,43 +69,63 @@ def _abs_under_data(path: str) -> bool:
         return False
 
 
+def _is_truthy(v) -> bool:
+    if v is True:
+        return True
+    if v is False or v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return v == 1
+    if isinstance(v, str):
+        s = v.strip().lower()
+        return s in ("1", "true", "yes", "y", "on")
+    return False
+
+
 def _extract_v1_paths(spec_v1: dict):
     inputs = spec_v1.get("inputs", {}) or {}
     output = spec_v1.get("output", {}) or {}
 
     avatar_path = inputs.get("avatar_image_asset_id")
     if not avatar_path or not isinstance(avatar_path, str):
-        return None, None, None, None, "inputs.avatar_image_asset_id is required"
+        return None, None, None, None, None, "inputs.avatar_image_asset_id is required"
     if not _abs_under_data(avatar_path):
-        return None, None, None, None, f"avatar_image path must be under {DATA_ROOT}"
+        return None, None, None, None, None, f"avatar_image path must be under {DATA_ROOT}"
     if not os.path.exists(avatar_path):
-        return None, None, None, None, f"avatar_image file not found: {avatar_path}"
+        return None, None, None, None, None, f"avatar_image file not found: {avatar_path}"
 
-    audio_path = inputs.get("voice_audio_asset_id")  # optional in 4.6
+    audio_path = inputs.get("voice_audio_asset_id")  # optional
     if audio_path is not None:
         if not isinstance(audio_path, str) or audio_path.strip() == "":
             audio_path = None
         else:
             audio_path = audio_path.strip()
             if not _abs_under_data(audio_path):
-                return None, None, None, None, f"voice_audio path must be under {DATA_ROOT}"
+                return None, None, None, None, None, f"voice_audio path must be under {DATA_ROOT}"
             if not os.path.exists(audio_path):
-                return None, None, None, None, f"voice_audio file not found: {audio_path}"
+                return None, None, None, None, None, f"voice_audio file not found: {audio_path}"
 
     thumb_key = output.get("thumb_object_key", "")
     if not thumb_key or not isinstance(thumb_key, str):
-        return None, None, None, None, "output.thumb_object_key is required"
+        return None, None, None, None, None, "output.thumb_object_key is required"
     thumb_dest = os.path.join(DATA_ROOT, thumb_key)
 
     video_key = output.get("video_object_key", "")
     if not video_key or not isinstance(video_key, str):
-        return None, None, None, None, "output.video_object_key is required"
+        return None, None, None, None, None, "output.video_object_key is required"
     video_dest = os.path.join(DATA_ROOT, video_key)
 
-    if not _abs_under_data(thumb_dest) or not _abs_under_data(video_dest):
-        return None, None, None, None, f"output paths must resolve under {DATA_ROOT}"
+    captions_key = output.get("captions_object_key", "")
+    captions_dest = None
+    if captions_key and isinstance(captions_key, str) and captions_key.strip() != "":
+        captions_dest = os.path.join(DATA_ROOT, captions_key.strip())
 
-    return avatar_path, audio_path, thumb_dest, video_dest, None
+    if not _abs_under_data(thumb_dest) or not _abs_under_data(video_dest):
+        return None, None, None, None, None, f"output paths must resolve under {DATA_ROOT}"
+    if captions_dest and not _abs_under_data(captions_dest):
+        return None, None, None, None, None, f"captions_object_key must resolve under {DATA_ROOT}"
+
+    return avatar_path, audio_path, thumb_dest, video_dest, captions_dest, None
 
 
 def _overwrite_thumbnail_with_avatar(avatar_path: str, thumb_dest: str):
@@ -175,9 +196,6 @@ def _render_video_from_avatar(avatar_path: str, video_dest: str, text: str, dura
 
 
 def _mux_audio(video_path: str, audio_path: str, out_path: str):
-    """
-    Combine video + audio, cut to shortest to avoid trailing black/silence mismatch.
-    """
     _ensure_dir(os.path.dirname(out_path))
     proc = subprocess.run(
         [
@@ -199,6 +217,54 @@ def _mux_audio(video_path: str, audio_path: str, out_path: str):
     return True, None
 
 
+def _format_vtt_time(seconds: float) -> str:
+    if seconds < 0:
+        seconds = 0
+    ms_total = int(round(seconds * 1000.0))
+    hh = ms_total // 3600000
+    ms_total -= hh * 3600000
+    mm = ms_total // 60000
+    ms_total -= mm * 60000
+    ss = ms_total // 1000
+    ms = ms_total - ss * 1000
+    return f"{hh:02d}:{mm:02d}:{ss:02d}.{ms:03d}"
+
+
+def _write_captions_vtt(dest_path: str, text: str, duration: float):
+    _ensure_dir(os.path.dirname(dest_path))
+    if not isinstance(text, str) or text.strip() == "":
+        text = "(sin texto)"
+    start = "00:00:00.000"
+    end = _format_vtt_time(duration)
+    content = "WEBVTT\n\n1\n{} --> {}\n{}\n".format(start, end, text.strip())
+    with open(dest_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def _burn_in_captions(video_in: str, vtt_path: str, video_out: str):
+    """
+    Burn subtitles into video. Requires ffmpeg with libass.
+    """
+    _ensure_dir(os.path.dirname(video_out))
+    # IMPORTANT: subtitles filter expects a local file path.
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-i", video_in,
+            "-vf", f"subtitles={vtt_path}",
+            "-c:a", "copy",
+            video_out,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return False, f"ffmpeg burn-in failed: {proc.stderr[-2000:]}"
+    return True, None
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path not in ("/render", "/render/v1"):
@@ -217,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/render/v1":
-            avatar_path, audio_path, thumb_dest, video_dest, err = _extract_v1_paths(spec)
+            avatar_path, audio_path, thumb_dest, video_dest, captions_dest, err = _extract_v1_paths(spec)
             if err:
                 _write_json(self, 400, {"error": err})
                 return
@@ -231,18 +297,13 @@ class Handler(BaseHTTPRequestHandler):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(spec_to_run, f)
 
-        try:
-            proc = subprocess.run(
-                ["bash", RENDER_SCRIPT, path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
-        except Exception as e:
-            _write_json(self, 500, {"error": f"render execution failed: {e}"})
-            return
-
+        proc = subprocess.run(
+            ["bash", RENDER_SCRIPT, path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
         if proc.returncode != 0:
             _write_json(self, 500, {"error": "render failed", "stderr": proc.stderr[-2000:], "stdout": proc.stdout[-2000:]})
             return
@@ -256,7 +317,6 @@ class Handler(BaseHTTPRequestHandler):
             params = spec.get("params", {}) or {}
             text = params.get("text", "")
 
-            # duration: audio length if present, else fallback 3s
             duration = 3.0
             if audio_path:
                 d, derr = _probe_audio_duration_seconds(audio_path)
@@ -265,7 +325,6 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 duration = d
 
-            # generate image-video (silent)
             temp_video = video_dest + ".silent.mp4"
             ok, err = _render_video_from_avatar(avatar_path, temp_video, text, duration)
             if not ok:
@@ -282,17 +341,19 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             else:
-                # no audio, just move silent -> final
-                try:
-                    os.replace(temp_video, video_dest)
-                except Exception:
-                    # fallback copy
-                    with open(temp_video, "rb") as src, open(video_dest, "wb") as dst:
-                        dst.write(src.read())
-                    try:
-                        os.remove(temp_video)
-                    except Exception:
-                        pass
+                os.replace(temp_video, video_dest)
+
+            # ✅ captions generation + burn-in ONLY when params.captions=1 AND captions_object_key present
+            if captions_dest and _is_truthy(params.get("captions")):
+                _write_captions_vtt(captions_dest, text, duration)
+
+                burnt = video_dest + ".burnt.mp4"
+                ok, err = _burn_in_captions(video_dest, captions_dest, burnt)
+                if not ok:
+                    _write_json(self, 500, {"error": err})
+                    return
+                # replace final video with burnt version
+                os.replace(burnt, video_dest)
 
         _write_json(self, 200, {"ok": True, "spec": os.path.basename(path)})
 
