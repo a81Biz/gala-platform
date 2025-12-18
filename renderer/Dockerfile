@@ -11,12 +11,11 @@ RUN apk add --no-cache \
 
 WORKDIR /renderer
 
-# Scripts de render
-COPY scripts/ ./scripts/
-RUN chmod +x ./scripts/*.sh
-
-# Server HTTP
-COPY server.py ./server.py
+# Copiar toda la aplicación
+COPY server.py ./
+COPY config.py ./
+COPY core/ ./core/
+COPY handlers/ ./handlers/
 
 EXPOSE 9000
 
