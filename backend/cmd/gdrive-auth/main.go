@@ -87,7 +87,7 @@ func main() {
 		oauth2.SetAuthURLParam("prompt", "consent"),
 	)
 
-	fmt.Println("\nAbre esta URL en tu navegador:\n")
+	fmt.Println("\nAbre esta URL en tu navegador:")
 	fmt.Println(authURL)
 	fmt.Println("\nEsperando autorización en:", redirectURL)
 
@@ -120,7 +120,7 @@ func main() {
 		return
 	}
 
-	fmt.Println("\n✅ REFRESH TOKEN:\n")
+	fmt.Println("\n✅ REFRESH TOKEN:")
 	fmt.Println(tok.RefreshToken)
 }
 

@@ -11,6 +11,8 @@ import (
 
 	"gala/internal/httpapi/handlers"
 	"gala/internal/httpkit"
+	"gala/internal/pkg/logger"
+	"gala/internal/pkg/middleware"
 	"gala/internal/ports"
 )
 
@@ -18,12 +20,19 @@ type Deps struct {
 	Pool *pgxpool.Pool
 	RDB  *redis.Client
 	SP   ports.StorageProvider
+	Log  *logger.Logger
 }
 
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 
-	// ---- CORS (Swagger UI + Frontend futuro) ----
+	// ---- GLOBAL MIDDLEWARE ----
+	// Order matters: RequestID first, then Recovery, then Logging
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Recovery(d.Log))
+	r.Use(middleware.Logging(d.Log))
+
+	// ---- CORS (Swagger UI + Frontend) ----
 	allowedOrigins := envCSV("CORS_ALLOWED_ORIGINS", []string{
 		"http://localhost:8081",
 		"http://localhost:5173",
@@ -31,7 +40,8 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(httpkit.CORS(httpkit.CORSOptions{
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Request-ID"},
+		ExposedHeaders:   []string{"X-Request-ID"},
 		AllowCredentials: false,
 		MaxAgeSeconds:    600,
 	}))
@@ -40,6 +50,7 @@ func NewRouter(d Deps) http.Handler {
 		Pool: d.Pool,
 		RDB:  d.RDB,
 		SP:   d.SP,
+		Log:  d.Log,
 	})
 
 	// ---- HEALTH ----
