@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:15
@@ -13,12 +11,22 @@ services:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gala -d gala"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7
     container_name: gala-redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
 
   api:
     build:
@@ -45,8 +53,10 @@ services:
     volumes:
       - data:/data
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8080:8080"
 
@@ -63,8 +73,6 @@ services:
       RENDERER_HTTP_BASEURL: http://renderer:9000
 
       # ---- FEATURE FLAGS ----
-      # Punto 3: cleanup local staging after upload+DB insert.
-      # Default is 0/empty (disabled).
       WORKER_CLEANUP_LOCAL: "${WORKER_CLEANUP_LOCAL}"
 
       # ---- STORAGE ----
@@ -80,9 +88,12 @@ services:
     volumes:
       - data:/data
     depends_on:
-      - postgres
-      - redis
-      - renderer
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      renderer:
+        condition: service_started
 
   renderer:
     build:
@@ -95,7 +106,6 @@ services:
     ports:
       - "9000:9000"
 
-  # ✅ Genera un v0.bundled.yaml (resuelve $ref) dentro del mismo volumen montado
   swagger-bundle:
     image: node:20-alpine
     container_name: gala-swagger-bundle
@@ -124,7 +134,6 @@ services:
       - "8081:8080"
     depends_on:
       - swagger-bundle
-
 
 volumes:
   pgdata:
