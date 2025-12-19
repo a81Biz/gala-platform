@@ -18,7 +18,9 @@ type ParsedJob struct {
 }
 
 func (j *ParsedJob) UsedV1() bool {
-	return j.HasEnvelope && len(j.Inputs) > 0
+	// Regla de negocio: si hay envelope (template_id), es v1.
+	// No depender de inputs para evitar fallback silencioso.
+	return j.HasEnvelope
 }
 
 func (j *ParsedJob) CaptionsEnabled() bool {
@@ -26,7 +28,8 @@ func (j *ParsedJob) CaptionsEnabled() bool {
 }
 
 func (j *ParsedJob) NeedsInputMaterialization() bool {
-	return j.HasEnvelope && len(j.Inputs) > 0
+	// Si es v1, los inputs son asset IDs y deben materializarse a paths locales.
+	return j.HasEnvelope
 }
 
 type JobParser struct {
@@ -111,7 +114,6 @@ func (jp *JobParser) fetchTemplateDefaults(ctx context.Context, templateID strin
 		`SELECT COALESCE(defaults, '{}'::jsonb) FROM templates WHERE id=$1 AND deleted_at IS NULL`,
 		templateID,
 	).Scan(&defaultsBytes)
-
 	if err != nil {
 		return nil, fmt.Errorf("template not found: %s", templateID)
 	}
@@ -131,14 +133,11 @@ func hasValidText(params map[string]any) bool {
 
 func mergeMaps(base, override map[string]any) map[string]any {
 	result := make(map[string]any)
-	
 	for k, v := range base {
 		result[k] = v
 	}
-	
 	for k, v := range override {
 		result[k] = v
 	}
-	
 	return result
 }
