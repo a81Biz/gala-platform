@@ -39,17 +39,12 @@ services:
       DATABASE_URL: postgres://gala:gala@postgres:5432/gala
       REDIS_ADDR: redis:6379
       CORS_ALLOWED_ORIGINS: "http://localhost:8081,http://localhost:5173"
-
-      # ---- STORAGE ----
       STORAGE_PROVIDER: gdrive
       STORAGE_LOCAL_ROOT: /data
-
-      # ---- GDRIVE (OAuth Installed App) ----
       GDRIVE_CLIENT_ID: "${GDRIVE_CLIENT_ID}"
       GDRIVE_CLIENT_SECRET: "${GDRIVE_CLIENT_SECRET}"
       GDRIVE_REFRESH_TOKEN: "${GDRIVE_REFRESH_TOKEN}"
       GDRIVE_FOLDER_ID: "${GDRIVE_FOLDER_ID}"
-
     volumes:
       - data:/data
     depends_on:
@@ -71,20 +66,13 @@ services:
       REDIS_ADDR: redis:6379
       JOB_QUEUE_NAME: gala:jobs
       RENDERER_HTTP_BASEURL: http://renderer:9000
-
-      # ---- FEATURE FLAGS ----
       WORKER_CLEANUP_LOCAL: "${WORKER_CLEANUP_LOCAL}"
-
-      # ---- STORAGE ----
       STORAGE_PROVIDER: gdrive
       STORAGE_LOCAL_ROOT: /data
-
-      # ---- GDRIVE ----
       GDRIVE_CLIENT_ID: "${GDRIVE_CLIENT_ID}"
       GDRIVE_CLIENT_SECRET: "${GDRIVE_CLIENT_SECRET}"
       GDRIVE_REFRESH_TOKEN: "${GDRIVE_REFRESH_TOKEN}"
       GDRIVE_FOLDER_ID: "${GDRIVE_FOLDER_ID}"
-
     volumes:
       - data:/data
     depends_on:
@@ -95,16 +83,61 @@ services:
       renderer:
         condition: service_started
 
+  # ============================================
+  # RENDERER - WhisperX para captions
+  # ============================================
   renderer:
     build:
       context: ../renderer
+      dockerfile: Dockerfile
     container_name: gala-renderer
     environment:
       RENDERER_PORT: "9000"
+      STORAGE_LOCAL_ROOT: /data
+      # WhisperX config
+      WHISPER_MODEL: "base"
+      WHISPER_DEVICE: "cuda"
+      WHISPER_COMPUTE_TYPE: "float16"
+      # SadTalker service URL (contenedor separado)
+      SADTALKER_API_URL: "http://sadtalker:10364"
     volumes:
       - data:/data
     ports:
       - "9000:9000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - sadtalker
+
+  # ============================================
+  # SADTALKER - Animación de avatar (contenedor separado)
+  # Usa imagen pre-construida con dependencias congeladas
+  # ============================================
+  sadtalker:
+    build:
+      context: ../sadtalker
+      dockerfile: Dockerfile
+    container_name: gala-sadtalker
+    environment:
+      SADTALKER_PORT: "10364"
+    volumes:
+      - data:/data
+      - sadtalker-checkpoints:/app/checkpoints
+      - sadtalker-gfpgan:/app/gfpgan/weights
+    ports:
+      - "10364:10364"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   swagger-bundle:
     image: node:20-alpine
@@ -138,3 +171,5 @@ services:
 volumes:
   pgdata:
   data:
+  sadtalker-checkpoints:
+  sadtalker-gfpgan:

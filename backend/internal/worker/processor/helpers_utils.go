@@ -82,6 +82,8 @@ func ExtFromMime(mime string) string {
 		return ".mp4"
 	case "text/vtt":
 		return ".vtt"
+	case "text/plain":
+		return ".txt"
 	default:
 		return ""
 	}

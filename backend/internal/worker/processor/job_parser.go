@@ -32,6 +32,11 @@ func (j *ParsedJob) NeedsInputMaterialization() bool {
 	return j.HasEnvelope
 }
 
+func (j *ParsedJob) HasAudio() bool {
+	audioID := strings.TrimSpace(j.Inputs["voice_audio_asset_id"])
+	return audioID != ""
+}
+
 type JobParser struct {
 	pool *pgxpool.Pool
 }
@@ -87,10 +92,27 @@ func (jp *JobParser) parseEnvelopeFormat(ctx context.Context, raw map[string]any
 	// Merge: defaults -> params del job
 	j.MergedParams = mergeMaps(defaults, j.Params)
 
-	// Validar campo requerido
-	if !hasValidText(j.MergedParams) {
-		return nil, fmt.Errorf("params.text is required (after defaults merge)")
+	// Validar campo text según contexto:
+	// - Si hay audio + captions: text es opcional (se transcribe del audio)
+	// - Si no hay audio: text es requerido (se usa para overlay/captions estáticos)
+	// - Si hay audio pero no captions: text es opcional (no se muestra nada)
+	hasAudio := strings.TrimSpace(j.Inputs["voice_audio_asset_id"]) != ""
+	captionsEnabled := IsTruthy(j.MergedParams["captions"])
+
+	if !hasAudio && !hasValidText(j.MergedParams) {
+		// Sin audio, necesitamos texto para mostrar algo
+		return nil, fmt.Errorf("params.text is required when no audio is provided")
 	}
+
+	// Si hay audio + captions pero no hay texto, está OK (se transcribirá)
+	// Si hay audio sin captions y sin texto, está OK (video sin texto)
+
+	// Asegurar que text tenga al menos string vacío para evitar nil
+	if _, ok := j.MergedParams["text"]; !ok {
+		j.MergedParams["text"] = ""
+	}
+
+	_ = captionsEnabled // usado para claridad, el compilador lo optimiza
 
 	return j, nil
 }
@@ -101,6 +123,7 @@ func (jp *JobParser) parseLegacyFormat(raw map[string]any, j *ParsedJob) (*Parse
 		j.MergedParams[k] = v
 	}
 
+	// Legacy siempre requiere text (no hay audio)
 	if !hasValidText(j.MergedParams) {
 		return nil, fmt.Errorf("params.text is required")
 	}

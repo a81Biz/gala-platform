@@ -2,6 +2,7 @@
 Generación de archivos de captions VTT
 """
 import os
+from typing import List, Dict, Optional
 from core.file_utils import ensure_dir
 
 
@@ -35,6 +36,7 @@ def format_vtt_timestamp(seconds: float) -> str:
 def generate_vtt_file(output_path: str, text: str, duration: float) -> None:
     """
     Genera un archivo VTT con un caption que cubre toda la duración
+    (Método legacy - un solo caption para todo el video)
     
     Args:
         output_path: Ruta donde guardar el archivo VTT
@@ -59,18 +61,18 @@ def generate_vtt_file(output_path: str, text: str, duration: float) -> None:
         f.write(content)
 
 
-def generate_multi_caption_vtt(output_path: str, captions: list, duration: float) -> None:
+def generate_multi_caption_vtt(output_path: str, captions: List[Dict], duration: float = None) -> None:
     """
     Genera un archivo VTT con múltiples captions
     
     Args:
         output_path: Ruta donde guardar el archivo VTT
         captions: Lista de dicts con 'start', 'end', 'text'
-        duration: Duración total del video
+        duration: Duración total del video (opcional, para validación)
         
     Example:
         captions = [
-            {"start": 0, "end": 2.5, "text": "First caption"},
+            {"start": 0.0, "end": 2.5, "text": "First caption"},
             {"start": 2.5, "end": 5.0, "text": "Second caption"},
         ]
     """
@@ -80,7 +82,8 @@ def generate_multi_caption_vtt(output_path: str, captions: list, duration: float
     
     for idx, cap in enumerate(captions, start=1):
         start = format_vtt_timestamp(cap.get("start", 0))
-        end = format_vtt_timestamp(cap.get("end", duration))
+        end_time = cap.get("end", duration if duration else 0)
+        end = format_vtt_timestamp(end_time)
         text = cap.get("text", "").strip()
         
         if not text:
@@ -95,3 +98,63 @@ def generate_multi_caption_vtt(output_path: str, captions: list, duration: float
     
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(content)
+
+
+def generate_vtt_from_transcription(
+    output_path: str,
+    audio_path: str,
+    language: Optional[str] = None,
+    fallback_text: Optional[str] = None,
+    fallback_duration: Optional[float] = None
+) -> bool:
+    """
+    Genera VTT desde transcripción de audio con WhisperX
+    
+    Args:
+        output_path: Ruta donde guardar el archivo VTT
+        audio_path: Ruta del archivo de audio a transcribir
+        language: Código de idioma (None para auto-detectar)
+        fallback_text: Texto a usar si la transcripción falla
+        fallback_duration: Duración para el fallback
+        
+    Returns:
+        True si se usó transcripción, False si se usó fallback
+    """
+    try:
+        # Importar transcriber (puede fallar si whisperx no está instalado)
+        from core.transcriber import transcribe_to_captions
+        
+        print(f"[captions] Transcribing audio for captions: {audio_path}")
+        
+        captions = transcribe_to_captions(
+            audio_path=audio_path,
+            language=language,
+            max_words_per_caption=8,
+            max_caption_duration=4.0
+        )
+        
+        if captions:
+            generate_multi_caption_vtt(output_path, captions)
+            print(f"[captions] Generated VTT with {len(captions)} captions from transcription")
+            return True
+        else:
+            print("[captions] Transcription returned no captions, using fallback")
+    
+    except ImportError as e:
+        print(f"[captions] WhisperX not available: {e}, using fallback")
+    
+    except Exception as e:
+        print(f"[captions] Transcription failed: {e}, using fallback")
+    
+    # Fallback: usar texto proporcionado
+    if fallback_text and fallback_duration:
+        print("[captions] Using fallback text for captions")
+        generate_vtt_file(output_path, fallback_text, fallback_duration)
+        return False
+    
+    # Si no hay fallback, crear VTT vacío
+    print("[captions] No fallback available, creating minimal VTT")
+    ensure_dir(os.path.dirname(output_path))
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("WEBVTT\n\n")
+    return False

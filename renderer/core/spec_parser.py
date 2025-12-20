@@ -67,6 +67,7 @@ class V1Spec:
         inputs = spec.get("inputs", {}) or {}
         self.avatar_path = self._extract_avatar(inputs)
         self.audio_path = self._extract_audio(inputs)
+        self.captions_input_path = self._extract_captions_input(inputs)
         
         # Output
         output = spec.get("output", {}) or {}
@@ -78,6 +79,11 @@ class V1Spec:
         params = spec.get("params", {}) or {}
         self.text = params.get("text", "")
         self.captions_enabled = is_truthy(params.get("captions"))
+    
+    @property
+    def has_external_captions(self) -> bool:
+        """True si se proporcionó un archivo VTT externo"""
+        return self.captions_input_path is not None
     
     def _extract_avatar(self, inputs: dict) -> str:
         """Extrae y valida avatar_image_asset_id"""
@@ -107,6 +113,27 @@ class V1Spec:
         validate_file_exists(audio, "voice_audio")
         
         return audio
+    
+    def _extract_captions_input(self, inputs: dict) -> Optional[str]:
+        """Extrae y valida captions_asset_id (opcional) - VTT externo"""
+        captions = inputs.get("captions_asset_id")
+        
+        if captions is None or (isinstance(captions, str) and captions.strip() == ""):
+            return None
+        
+        if not isinstance(captions, str):
+            raise ValidationError("captions_asset_id must be a string")
+        
+        captions = captions.strip()
+        validate_path_under_data(captions, "captions_input")
+        validate_file_exists(captions, "captions_input")
+        
+        # Validar que sea un archivo VTT
+        if not captions.lower().endswith('.vtt'):
+            # No es crítico, pero advertimos
+            print(f"[warning] captions_asset_id does not have .vtt extension: {captions}")
+        
+        return captions
     
     def _extract_video_output(self, output: dict) -> str:
         """Extrae y valida video_object_key"""
